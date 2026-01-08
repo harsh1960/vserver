@@ -3,7 +3,7 @@ require __DIR__ . '/vendor/autoload.php';
 
 use Kreait\Firebase\Factory;
 
-// 1. FORCE LOGS TO APPEAR
+// Enable Logs
 file_put_contents('php://stderr', "Hit received at " . date('Y-m-d H:i:s') . "\n");
 
 $input = file_get_contents('php://input');
@@ -17,8 +17,8 @@ if (isset($data['event']) && $data['event'] === 'payment.captured') {
 
     file_put_contents('php://stderr', "Payment Details: Email=$payerEmail, Amount=$amount\n");
 
-    // Accept ₹4900 OR ₹100
-    if ($payerEmail && ($amount == 4900 || $amount == 100)) {
+    // --- FIX: Allow ANY amount greater than or equal to ₹1 (100 paise) ---
+    if ($payerEmail && $amount >= 100) {
         
         try {
             $factory = (new Factory)
@@ -37,7 +37,7 @@ if (isset($data['event']) && $data['event'] === 'payment.captured') {
                 $found = true;
                 $userId = $document->id();
                 
-                // --- THE CRITICAL FIX: Convert Seconds to MILLISECONDS ---
+                // Convert Seconds to Milliseconds for JS compatibility
                 $newExpiry = (time() + (30 * 24 * 60 * 60)) * 1000; 
                 
                 $usersRef->document($userId)->set([
@@ -46,7 +46,7 @@ if (isset($data['event']) && $data['event'] === 'payment.captured') {
                     'plan' => 'premium'
                 ], ['merge' => true]);
 
-                file_put_contents('php://stderr', "SUCCESS: Updated User $userId to expiry $newExpiry\n");
+                file_put_contents('php://stderr', "SUCCESS: Updated User $userId ($payerEmail) to expiry $newExpiry\n");
             }
 
             if (!$found) {
@@ -58,7 +58,7 @@ if (isset($data['event']) && $data['event'] === 'payment.captured') {
         }
 
     } else {
-        file_put_contents('php://stderr', "IGNORED: Amount $amount not allowed.\n");
+        file_put_contents('php://stderr', "IGNORED: Amount $amount is too low (Needs 100+).\n");
     }
 } else {
     file_put_contents('php://stderr', "PING: Connection working, but not a payment event.\n");
