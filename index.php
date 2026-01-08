@@ -1,62 +1,66 @@
 <?php
-// index.php - Matches User by Email
 require __DIR__ . '/vendor/autoload.php';
 
 use Kreait\Firebase\Factory;
 
-// 1. Receive Webhook
+// 1. FORCE LOGS TO APPEAR
+file_put_contents('php://stderr', "Hit received at " . date('Y-m-d H:i:s') . "\n");
+
 $input = file_get_contents('php://input');
 $data = json_decode($input, true);
 
-// 2. Check Event
 if (isset($data['event']) && $data['event'] === 'payment.captured') {
     
     $payment = $data['payload']['payment']['entity'];
-    $amount = $payment['amount']; // 4900 = ₹49
-    $payerEmail = $payment['email']; // The email they entered in Razorpay
+    $amount = $payment['amount']; 
+    $payerEmail = $payment['email']; 
 
-   // Allow either ₹49 OR ₹1 (for testing)
-if ($payerEmail && ($amount == 4900 || $amount == 100)) {
+    file_put_contents('php://stderr', "Payment Details: Email=$payerEmail, Amount=$amount\n");
+
+    // Accept ₹4900 OR ₹100
+    if ($payerEmail && ($amount == 4900 || $amount == 100)) {
         
-        // 3. Connect to Firebase
-        $factory = (new Factory)
-            ->withServiceAccount(json_decode(getenv('FIREBASE_CREDENTIALS'), true));
-        
-        $firestore = $factory->createFirestore();
-        $database = $firestore->database();
-        $usersRef = $database->collection('users');
-
-        // 4. SEARCH for the user with this email
-        // (Because we don't have the UID directly)
-        $query = $usersRef->where('email', '=', $payerEmail);
-        $documents = $query->documents();
-
-        $found = false;
-        foreach ($documents as $document) {
-            $found = true;
-            $userId = $document->id();
-
-            // 5. Update Subscription
-            $newExpiry = time() + (30 * 24 * 60 * 60); // 30 Days
+        try {
+            $factory = (new Factory)
+                ->withServiceAccount(json_decode(getenv('FIREBASE_CREDENTIALS'), true));
             
-            $usersRef->document($userId)->set([
-                'subscriptionExpiry' => $newExpiry,
-                'lastPaymentId' => $payment['id'],
-                'plan' => 'premium'
-            ], ['merge' => true]);
+            $firestore = $factory->createFirestore();
+            $database = $firestore->database();
+            $usersRef = $database->collection('users');
 
-            echo "Success: User $userId ($payerEmail) Upgraded.";
-        }
+            // Find user by Email
+            $query = $usersRef->where('email', '=', $payerEmail);
+            $documents = $query->documents();
 
-        if (!$found) {
-            // This happens if they used an email that isn't in your database
-            echo "Error: No user found with email $payerEmail";
+            $found = false;
+            foreach ($documents as $document) {
+                $found = true;
+                $userId = $document->id();
+                
+                // --- THE CRITICAL FIX: Convert Seconds to MILLISECONDS ---
+                $newExpiry = (time() + (30 * 24 * 60 * 60)) * 1000; 
+                
+                $usersRef->document($userId)->set([
+                    'subscriptionExpiry' => $newExpiry,
+                    'lastPaymentId' => $payment['id'],
+                    'plan' => 'premium'
+                ], ['merge' => true]);
+
+                file_put_contents('php://stderr', "SUCCESS: Updated User $userId to expiry $newExpiry\n");
+            }
+
+            if (!$found) {
+                file_put_contents('php://stderr', "ERROR: No user found for email $payerEmail\n");
+            }
+
+        } catch (Exception $e) {
+            file_put_contents('php://stderr', "CRITICAL ERROR: " . $e->getMessage() . "\n");
         }
 
     } else {
-        echo "Error: Invalid Amount or Missing Email.";
+        file_put_contents('php://stderr', "IGNORED: Amount $amount not allowed.\n");
     }
 } else {
-    echo "Ignored event.";
+    file_put_contents('php://stderr', "PING: Connection working, but not a payment event.\n");
 }
 ?>
