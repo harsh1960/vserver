@@ -15,7 +15,8 @@ if (isset($data['event']) && $data['event'] === 'payment.captured') {
     $amount = $payment['amount']; // 4900 = ₹49
     $payerEmail = $payment['email']; // The email they entered in Razorpay
 
-    if ($payerEmail && $amount == 4900) {
+   // Allow either ₹49 OR ₹1 (for testing)
+if ($payerEmail && ($amount == 4900 || $amount == 100)) {
         
         // 3. Connect to Firebase
         $factory = (new Factory)
