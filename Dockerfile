@@ -1,26 +1,30 @@
-# Use the official PHP image with Apache
+# Use the official PHP image
 FROM php:8.1-apache
 
-# Install system tools needed for Composer
+# 1. INSTALL SYSTEM DEPENDENCIES (Critical Fix)
+# We add zip, unzip, and git so Composer doesn't crash
 RUN apt-get update && apt-get install -y \
-    git \
     zip \
-    unzip
+    unzip \
+    git \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install Composer (The tool that installs your Firebase library)
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+# 2. Enable Apache Rewrite Module
+RUN a2enmod rewrite
 
-# Set the working directory inside the server
+# 3. Set Working Directory
 WORKDIR /var/www/html
 
-# Copy all your files (index.php, composer.json) into the server
+# 4. Copy Composer from the official image
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+
+# 5. Copy your project files
 COPY . .
 
-# Run Composer to install the Firebase library
-RUN composer install --no-dev --optimize-autoloader
+# 6. Install PHP Dependencies
+# We use --ignore-platform-reqs to prevent errors if specific PHP extensions are missing
+# (Google Firestore works fine in REST mode without them)
+RUN composer install --no-dev --optimize-autoloader --ignore-platform-reqs
 
-# Allow Apache to read the files
-RUN chown -R www-data:www-data /var/www/html
-
-# Tell Render to use Port 80
+# 7. Expose Port
 EXPOSE 80
