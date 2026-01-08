@@ -1,51 +1,61 @@
 <?php
-// index.php - Upload this to Render
+// index.php - Matches User by Email
 require __DIR__ . '/vendor/autoload.php';
 
 use Kreait\Firebase\Factory;
 
-// 1. RECEIVE WEBHOOK DATA
+// 1. Receive Webhook
 $input = file_get_contents('php://input');
 $data = json_decode($input, true);
 
-// 2. CHECK EVENT TYPE
-// We only care if the payment was "Captured" (Successful)
+// 2. Check Event
 if (isset($data['event']) && $data['event'] === 'payment.captured') {
     
-    // 3. GET DATA
     $payment = $data['payload']['payment']['entity'];
-    $amount = $payment['amount']; // 4900 (for ₹49)
-    $email = $payment['email'];
-    
-    // CRITICAL: Get the User ID we attached from the Frontend
-    // Razorpay puts this inside 'notes'
-    $userId = $payment['notes']['firebase_uid'] ?? null;
+    $amount = $payment['amount']; // 4900 = ₹49
+    $payerEmail = $payment['email']; // The email they entered in Razorpay
 
-    if ($userId && $amount == 4900) {
+    if ($payerEmail && $amount == 4900) {
         
-        // 4. CONNECT TO FIREBASE
-        // We use an Environment Variable on Render for security
+        // 3. Connect to Firebase
         $factory = (new Factory)
             ->withServiceAccount(json_decode(getenv('FIREBASE_CREDENTIALS'), true));
         
         $firestore = $factory->createFirestore();
         $database = $firestore->database();
+        $usersRef = $database->collection('users');
 
-        // 5. UPDATE USER SUBSCRIPTION
-        $newExpiry = time() + (30 * 24 * 60 * 60); // 30 Days from now
-        
-        $userRef = $database->collection('users')->document($userId);
-        $userRef->set([
-            'subscriptionExpiry' => $newExpiry,
-            'lastPaymentId' => $payment['id'],
-            'plan' => 'premium'
-        ], ['merge' => true]);
+        // 4. SEARCH for the user with this email
+        // (Because we don't have the UID directly)
+        $query = $usersRef->where('email', '=', $payerEmail);
+        $documents = $query->documents();
 
-        echo "Success: User $userId Upgraded.";
+        $found = false;
+        foreach ($documents as $document) {
+            $found = true;
+            $userId = $document->id();
+
+            // 5. Update Subscription
+            $newExpiry = time() + (30 * 24 * 60 * 60); // 30 Days
+            
+            $usersRef->document($userId)->set([
+                'subscriptionExpiry' => $newExpiry,
+                'lastPaymentId' => $payment['id'],
+                'plan' => 'premium'
+            ], ['merge' => true]);
+
+            echo "Success: User $userId ($payerEmail) Upgraded.";
+        }
+
+        if (!$found) {
+            // This happens if they used an email that isn't in your database
+            echo "Error: No user found with email $payerEmail";
+        }
+
     } else {
-        echo "Error: Invalid User ID or Amount.";
+        echo "Error: Invalid Amount or Missing Email.";
     }
 } else {
-    echo "Ignored: Not a payment.captured event.";
+    echo "Ignored event.";
 }
 ?>
